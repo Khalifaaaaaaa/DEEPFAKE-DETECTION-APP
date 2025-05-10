@@ -1,6 +1,6 @@
 streamlit==1.34.0
 opencv-python-headless==4.9.0.80
-numpy==1.24.4
+numpy>=1.26.0,<2.0.0
 pickle5==0.0.11
 tensorflow==2.13.0
 keras==2.13.1
