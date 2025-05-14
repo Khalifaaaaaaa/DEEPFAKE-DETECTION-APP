@@ -28,7 +28,7 @@ deepfake_model = load_model("deepfake_detector.h5")
 feature_extractor = Xception(weights='imagenet', include_top=False, pooling='avg', input_shape=(224, 224, 3))
 
 # Streamlit UI
-st.title("🇵🇭 Filipino Celebrity Deepfake Detection App")
+st.title("🇵🇭 Filipino Personality Deepfake Detection App")
 st.write("Upload an **image or video** to check if it contains a known Filipino celebrity **and** whether it's a deepfake. We also score credibility based on quality and metadata.")
 
 # Face embedding and recognition
@@ -65,10 +65,10 @@ def check_exif_metadata(image):
     try:
         exif_data = image._getexif()
         if exif_data:
-            return 1  # metadata present
+            return 1
     except:
         pass
-    return 0  # no metadata
+    return 0
 
 # Blur score
 def check_blur(image_np):
@@ -113,43 +113,45 @@ def process_image(image):
         results.append(f"Detected: {name} (Similarity: {similarity:.2f})")
     return "\n".join(results), name, similarity
 
-# Video frame processing (200 frames)
-def process_video(video_path):
+# Efficient video processing (early exit on Fake)
+def process_video(video_path, frame_step=5):
     cap = cv2.VideoCapture(video_path)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if frame_count <= 0:
-        return "Could not read video.", None, None, None, None
-
-    frame_indices = np.linspace(0, frame_count - 1, 200, dtype=int)
     celeb_detected = {}
-    deepfake_results = []
     credibility_scores = []
+    total_processed = 0
 
-    for i in frame_indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+    frame_idx = 0
+    while cap.isOpened():
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if not ret:
-            continue
+            break
 
+        total_processed += 1
         image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         recognition_result, celeb_name, similarity = process_image(image)
         label, confidence = detect_deepfake(image)
+
         credibility_score = calculate_credibility_score(image, celeb_name if celeb_name else "Unknown")
 
         if celeb_name:
             celeb_detected[celeb_name] = celeb_detected.get(celeb_name, 0) + 1
-        deepfake_results.append((label, confidence))
         credibility_scores.append(credibility_score)
 
+        # Exit early on detection of deepfake
+        if label == "Fake":
+            cap.release()
+            return celeb_name or "Unknown", label, confidence, np.mean(credibility_scores), total_processed
+
+        frame_idx += frame_step
+        if frame_idx >= frame_count:
+            break
+
     cap.release()
-
     most_common_celeb = max(celeb_detected, key=celeb_detected.get) if celeb_detected else "Unknown"
-    avg_deepfake = np.mean([c for _, c in deepfake_results]) if deepfake_results else 0
-    deepfake_label = "Fake" if avg_deepfake >= 0.5 else "Real"
-    deepfake_conf = avg_deepfake if avg_deepfake >= 0.5 else 1 - avg_deepfake
     avg_cred_score = np.mean(credibility_scores) if credibility_scores else 0
-
-    return most_common_celeb, deepfake_label, deepfake_conf, avg_cred_score, len(deepfake_results)
+    return most_common_celeb, "Real", 1.0, avg_cred_score, total_processed
 
 # File uploader
 uploaded_file = st.file_uploader("Upload an image or video", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"])
